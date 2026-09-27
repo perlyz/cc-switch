@@ -68,7 +68,15 @@ pub async fn save_settings(
     let unify_codex_changed =
         merged.unify_codex_session_history != existing.unify_codex_session_history;
     let unify_codex_enabled = merged.unify_codex_session_history;
+    let insecure_tls_changed = merged.allow_insecure_tls != existing.allow_insecure_tls;
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+
+    // 当证书校验策略发生变化时，刷新全局 HTTP 客户端连接池，以便新设置立即生效
+    if insecure_tls_changed {
+        if let Err(e) = crate::proxy::http_client::refresh_client() {
+            log::warn!("切换证书校验策略后刷新 HTTP 客户端失败: {e}");
+        }
+    }
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。

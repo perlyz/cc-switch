@@ -338,6 +338,11 @@
       "title": "About Common Config",
       "message": "The \"Common Config Snippet\" lets you share plugins, environment variables, and other settings across different providers — so they won't be lost when you switch.\n\nHow to use:\n① Edit a provider → click \"Edit Common Config\" → \"Extract from Editor\"\n② When creating a new provider, check \"Apply Common Config\" (enabled by default)\n\nIf you've newly installed plugins or hooks, re-extract the common config to keep them in sync.",
       "confirm": "Got it"
+    },
+    "insecureTls": {
+      "title": "Security Risk Warning",
+      "message": "Enabling this option skips SSL/TLS certificate validity and hostname verification for upstream HTTPS requests.\n\nThis may expose your traffic to Man-in-the-Middle (MITM) attacks. Only enable this if you trust your local network and need to connect to self-signed intranet endpoints.\n\nAre you sure you want to proceed?",
+      "confirm": "I Understand the Risks, Proceed"
     }
   },
   "settings": {
@@ -445,6 +450,12 @@
           "debug": "Detailed info including SSE stream and request/response",
           "trace": "All logs, most verbose"
         }
+      },
+      "insecureTls": {
+        "title": "Certificate Verification",
+        "description": "Allow bypassing HTTPS certificate and hostname verification for intranet endpoints",
+        "toggleTitle": "Allow Insecure HTTPS Connections",
+        "toggleDescription": "Skip self-signed certificate and hostname verification. Only recommended for local gateways or test environments."
       }
     },
     "language": "Language",

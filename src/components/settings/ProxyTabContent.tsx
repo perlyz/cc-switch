@@ -38,6 +38,7 @@ export function ProxyTabContent({
   const { t } = useTranslation();
   const [showProxyConfirm, setShowProxyConfirm] = useState(false);
   const [showFailoverConfirm, setShowFailoverConfirm] = useState(false);
+  const [showInsecureTlsConfirm, setShowInsecureTlsConfirm] = useState(false);
 
   const {
     isRunning,
@@ -85,6 +86,23 @@ export function ProxyTabContent({
       await onAutoSave({ failoverConfirmed: true, enableFailoverToggle: true });
     } catch (error) {
       console.error("Failover confirm failed:", error);
+    }
+  };
+
+  const handleInsecureTlsToggle = (checked: boolean) => {
+    if (checked) {
+      setShowInsecureTlsConfirm(true);
+    } else {
+      void onAutoSave({ allowInsecureTls: false });
+    }
+  };
+
+  const handleInsecureTlsConfirm = async () => {
+    setShowInsecureTlsConfirm(false);
+    try {
+      await onAutoSave({ allowInsecureTls: true });
+    } catch (error) {
+      console.error("Insecure TLS confirm failed:", error);
     }
   };
 
@@ -267,6 +285,35 @@ export function ProxyTabContent({
             <GlobalProxySettings />
           </AccordionContent>
         </AccordionItem>
+
+        {/* Insecure TLS / Certificate Verification Bypass */}
+        <AccordionItem
+          value="insecureTls"
+          className="rounded-xl glass-card overflow-hidden"
+        >
+          <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="h-5 w-5 text-amber-500" />
+              <div className="text-left">
+                <h3 className="text-base font-semibold">
+                  {t("settings.advanced.insecureTls.title")}
+                </h3>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {t("settings.advanced.insecureTls.description")}
+                </p>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50 space-y-4">
+            <ToggleRow
+              icon={<ShieldAlert className="h-4 w-4 text-amber-500" />}
+              title={t("settings.advanced.insecureTls.toggleTitle")}
+              description={t("settings.advanced.insecureTls.toggleDescription")}
+              checked={Boolean(settings?.allowInsecureTls)}
+              onCheckedChange={handleInsecureTlsToggle}
+            />
+          </AccordionContent>
+        </AccordionItem>
       </Accordion>
 
       <ConfirmDialog
@@ -287,6 +334,16 @@ export function ProxyTabContent({
         confirmText={t("confirm.failover.confirm")}
         onConfirm={() => void handleFailoverConfirm()}
         onCancel={() => setShowFailoverConfirm(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={showInsecureTlsConfirm}
+        variant="destructive"
+        title={t("confirm.insecureTls.title")}
+        message={t("confirm.insecureTls.message")}
+        confirmText={t("confirm.insecureTls.confirm")}
+        onConfirm={() => void handleInsecureTlsConfirm()}
+        onCancel={() => setShowInsecureTlsConfirm(false)}
       />
     </motion.div>
   );

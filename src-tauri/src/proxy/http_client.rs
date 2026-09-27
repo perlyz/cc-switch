@@ -196,6 +196,12 @@ pub fn get() -> Client {
         })
 }
 
+/// 刷新全局 HTTP 客户端（例如当 allow_insecure_tls 开关变更时）
+pub fn refresh_client() -> Result<(), String> {
+    let current_proxy = get_current_proxy_url();
+    apply_proxy(current_proxy.as_deref())
+}
+
 /// 获取当前代理 URL
 ///
 /// 返回当前配置的代理 URL，None 表示直连。
@@ -225,6 +231,21 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         .no_brotli()
         .no_deflate()
         .no_zstd();
+
+    // 允许不信任的自签名证书（仅在用户显式开启设置时生效）
+    if crate::settings::get_settings().allow_insecure_tls {
+        // 注意：macOS 下 reqwest 若使用操作系统原生 Security Framework (native-tls)，
+        // 会强制检查证书有效期（超过 825 天直接拒绝，报 'validity period exceeds maximum allowed'）。
+        // 显式指定 use_rustls_tls() 强制切到纯 Rust 的 rustls 栈，确保 danger_accept_invalid_certs
+        // 能彻底跳过包含有效期在内的所有证书与主机名验证，保证跨平台自签证书正常连通。
+        builder = builder
+            .use_rustls_tls()
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+        log::debug!(
+            "[HttpClient] Insecure TLS enabled with rustls (accepting invalid certificates and hostnames)"
+        );
+    }
 
     // 有代理地址则使用代理，否则跟随系统代理
     if let Some(url) = proxy_url {
@@ -461,5 +482,16 @@ mod tests {
         for key in &keys {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn test_build_client_insecure_tls() {
+        let _guard = env_lock().lock().unwrap();
+        // 验证不论是正常还是开启不安全 TLS，build_client 均能正常构建客户端
+        let client_normal = build_client(None);
+        assert!(client_normal.is_ok());
+
+        let client_with_proxy = build_client(Some("http://127.0.0.1:8080"));
+        assert!(client_with_proxy.is_ok());
     }
 }

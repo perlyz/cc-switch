@@ -55,21 +55,83 @@ type HyperClient = Client<
     http_body_util::Full<Bytes>,
 >;
 
+#[derive(Debug)]
+struct NoCertVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 /// Lazily-initialized hyper client with header-case preservation enabled.
 fn global_hyper_client() -> &'static HyperClient {
-    static CLIENT: OnceLock<HyperClient> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        let connector = HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_http1()
-            .build();
+    static SECURE_CLIENT: OnceLock<HyperClient> = OnceLock::new();
+    static INSECURE_CLIENT: OnceLock<HyperClient> = OnceLock::new();
 
-        Client::builder(TokioExecutor::new())
-            .http1_preserve_header_case(true)
-            .http1_title_case_headers(true)
-            .build(connector)
-    })
+    if crate::settings::get_settings().allow_insecure_tls {
+        INSECURE_CLIENT.get_or_init(|| {
+            let client_config = rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(std::sync::Arc::new(NoCertVerifier))
+                .with_no_client_auth();
+
+            let connector = HttpsConnectorBuilder::new()
+                .with_tls_config(client_config)
+                .https_or_http()
+                .enable_http1()
+                .build();
+
+            Client::builder(TokioExecutor::new())
+                .http1_preserve_header_case(true)
+                .http1_title_case_headers(true)
+                .build(connector)
+        })
+    } else {
+        SECURE_CLIENT.get_or_init(|| {
+            let connector = HttpsConnectorBuilder::new()
+                .with_webpki_roots()
+                .https_or_http()
+                .enable_http1()
+                .build();
+
+            Client::builder(TokioExecutor::new())
+                .http1_preserve_header_case(true)
+                .http1_title_case_headers(true)
+                .build(connector)
+        })
+    }
 }
 
 /// 响应体读取上限（128 MiB）。正常非流式补全响应只有几十到几百 KiB；超过则视为
@@ -576,21 +638,36 @@ async fn connect_via_proxy(
 /// Loads both webpki roots AND native system certificates so that
 /// proxy MITM CAs (e.g. Clash, mitmproxy) installed in the system
 /// keychain are trusted through the CONNECT tunnel.
+///
+/// When `allow_insecure_tls` is enabled in settings, uses a bypass verifier.
 fn global_tls_connector() -> &'static tokio_rustls::TlsConnector {
-    static CONNECTOR: OnceLock<tokio_rustls::TlsConnector> = OnceLock::new();
-    CONNECTOR.get_or_init(|| {
-        let mut root_store = rustls::RootCertStore::empty();
-        // Baseline: Mozilla/webpki roots
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        // Native system certs (includes user-installed proxy CAs)
-        let native = rustls_native_certs::load_native_certs();
-        let (added, _errors) = root_store.add_parsable_certificates(native.certs);
-        log::debug!("[HyperClient] TLS root store: webpki + {added} native certs");
-        let config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-        tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
-    })
+    static SECURE_CONNECTOR: OnceLock<tokio_rustls::TlsConnector> = OnceLock::new();
+    static INSECURE_CONNECTOR: OnceLock<tokio_rustls::TlsConnector> = OnceLock::new();
+
+    if crate::settings::get_settings().allow_insecure_tls {
+        INSECURE_CONNECTOR.get_or_init(|| {
+            log::warn!("[HyperClient] Insecure TLS connector initialized (certificate validation bypassed)");
+            let config = rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(std::sync::Arc::new(NoCertVerifier))
+                .with_no_client_auth();
+            tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
+        })
+    } else {
+        SECURE_CONNECTOR.get_or_init(|| {
+            let mut root_store = rustls::RootCertStore::empty();
+            // Baseline: Mozilla/webpki roots
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            // Native system certs (includes user-installed proxy CAs)
+            let native = rustls_native_certs::load_native_certs();
+            let (added, _errors) = root_store.add_parsable_certificates(native.certs);
+            log::debug!("[HyperClient] TLS root store: webpki + {added} native certs");
+            let config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            tokio_rustls::TlsConnector::from(std::sync::Arc::new(config))
+        })
+    }
 }
 
 /// Build raw HTTP/1.1 request bytes with original header casing.

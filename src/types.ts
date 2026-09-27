@@ -399,6 +399,8 @@ export interface Settings {
   autoSyncConfirmed?: boolean;
   // User has confirmed the common config first-run notice
   commonConfigConfirmed?: boolean;
+  // 允许不安全的 HTTPS 连接（跳过自签名证书和主机名校验）
+  allowInsecureTls?: boolean;
   // 首选语言（可选，默认中文）
   language?: "en" | "zh" | "zh-TW" | "ja";
 
